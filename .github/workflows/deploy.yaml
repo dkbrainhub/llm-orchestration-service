@@ -51,8 +51,8 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key \
             ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} << 'EOF'
-          if [ -L "$APP_HOME/current" ]; then
-            CURRENT=$(basename $(readlink $APP_HOME/current))
+          if [ -L "$APP_HOME/latest" ]; then
+            CURRENT=$(basename $(readlink $APP_HOME/latest))
             echo "$CURRENT" > $APP_HOME/.backups/previous_version
             echo "Previous version saved: $CURRENT"
           fi
@@ -77,13 +77,12 @@ jobs:
             "$JAR_FILE" \
             ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }}:$APP_HOME/versions/$DEPLOY_VERSION/app.jar
           
-          # Update current symlink and save version info
+          # Update latest symlink and save version info
           ssh -i ~/.ssh/deploy_key \
-            ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} << 'EOF'
-          rm -f $APP_HOME/current
-          ln -s $APP_HOME/versions/$DEPLOY_VERSION $APP_HOME/current
-          echo "$DEPLOY_VERSION" > $APP_HOME/.backups/current_version
-          echo "Deployed version: $DEPLOY_VERSION"
+            ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} << EOF
+          ln -sfn \$APP_HOME/versions/\$DEPLOY_VERSION \$APP_HOME/latest
+          echo "\$DEPLOY_VERSION" > \$APP_HOME/.backups/current_version
+          echo "Deployed version: \$DEPLOY_VERSION"
           EOF
 
       - name: 🔄 Restart application
@@ -110,7 +109,7 @@ jobs:
           
           # Start the new application
           echo "Starting new application..."
-          cd $APP_HOME/current
+          cd $APP_HOME/latest
           nohup java -jar app.jar \
             --spring.application.name=$APP_NAME \
             --spring.profiles.active=$PROFILE \
@@ -177,12 +176,11 @@ jobs:
             PREVIOUS=\$(cat $APP_HOME/.backups/previous_version)
             if [ -d "$APP_HOME/versions/\$PREVIOUS" ]; then
               # Revert to previous version
-              rm -f $APP_HOME/current
-              ln -s $APP_HOME/versions/\$PREVIOUS $APP_HOME/current
+              ln -sfn $APP_HOME/versions/\$PREVIOUS $APP_HOME/latest
               echo "\$PREVIOUS" > $APP_HOME/.backups/current_version
               
               # Restart with previous version
-              cd $APP_HOME/current
+              cd $APP_HOME/latest
               nohup java -jar app.jar \
                 --spring.application.name=$APP_NAME \
                 --spring.profiles.active=$PROFILE \
