@@ -64,6 +64,8 @@ jobs:
           COMMIT_SHORT="${COMMIT_ID:0:7}"
           DEPLOY_VERSION="v_$(date +%Y%m%d_%H%M%S)_${COMMIT_SHORT}"
           
+          echo "Deploying version: $DEPLOY_VERSION"
+          
           # Create version directory on remote
           ssh -i ~/.ssh/deploy_key \
             ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} \
@@ -80,9 +82,7 @@ jobs:
           # Update latest symlink and save version info
           ssh -i ~/.ssh/deploy_key \
             ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} \
-            "ln -sfn $APP_HOME/versions/$DEPLOY_VERSION $APP_HOME/latest && \
-             echo $DEPLOY_VERSION > $APP_HOME/.backups/current_version && \
-             echo 'Deployed version: $DEPLOY_VERSION'"
+            "ln -sfn $APP_HOME/versions/$DEPLOY_VERSION $APP_HOME/latest && echo $DEPLOY_VERSION > $APP_HOME/.backups/current_version && echo 'Symlink updated to: $DEPLOY_VERSION'"
 
       - name: 🔄 Restart application
         run: |
