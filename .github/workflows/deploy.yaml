@@ -8,9 +8,10 @@ on:
   workflow_dispatch:
 
 env:
-  APP_NAME: llm-orchestrator
-  APP_HOME: /applications/llm-orchestrator
+  APP_NAME: llm-orchestrator-service
+  APP_HOME: /applications/llm-orchestrator-service
   APP_PORT: 8080
+  PROFILE: ollama
 
 jobs:
   build-and-deploy:
@@ -88,32 +89,52 @@ jobs:
       - name: 🔄 Restart application
         run: |
           ssh -i ~/.ssh/deploy_key \
-            ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} << 'EOF'
+            ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} << EOF
           set -e
           
-          # Stop the current application
-          echo "Stopping application..."
-          sudo systemctl stop $APP_NAME || true
-          sleep 2
+          # Stop the old application
+          echo "Stopping old application..."
+          if [ -f "$APP_HOME/app.pid" ]; then
+            OLD_PID=\$(cat $APP_HOME/app.pid)
+            if ps -p \$OLD_PID > /dev/null 2>&1; then
+              kill \$OLD_PID
+              echo "Stopped process \$OLD_PID"
+              sleep 3
+              # Force kill if still running
+              if ps -p \$OLD_PID > /dev/null 2>&1; then
+                kill -9 \$OLD_PID
+                echo "Force killed process \$OLD_PID"
+              fi
+            fi
+          fi
           
           # Start the new application
-          echo "Starting application..."
-          sudo systemctl start $APP_NAME
-          sleep 3
+          echo "Starting new application..."
+          cd $APP_HOME/current
+          nohup java -jar app.jar \
+            --spring.application.name=$APP_NAME \
+            --spring.profiles.active=$PROFILE \
+            --server.port=$APP_PORT \
+            > $APP_HOME/logs/app.log 2>&1 &
           
-          # Check if application is running
-          if sudo systemctl is-active --quiet $APP_NAME; then
-            echo "✅ Application started successfully"
+          NEW_PID=\$!
+          echo \$NEW_PID > $APP_HOME/app.pid
+          echo "✅ Application started with PID: \$NEW_PID"
+          
+          # Wait a bit and check if process is still running
+          sleep 5
+          if ps -p \$NEW_PID > /dev/null 2>&1; then
+            echo "✅ Application is running"
           else
             echo "❌ Application failed to start"
-            sudo journalctl -u $APP_NAME -n 50 --no-pager
+            tail -50 $APP_HOME/logs/app.log
             exit 1
           fi
           EOF
 
       - name: ✅ Verify deployment
         run: |
-          sleep 3
+          sleep 5
           echo "Verifying deployment..."
           
           # Check application health
@@ -125,12 +146,12 @@ jobs:
             # Display some logs
             ssh -i ~/.ssh/deploy_key \
               ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} \
-              "sudo journalctl -u $APP_NAME -n 20 --no-pager"
+              "tail -30 $APP_HOME/logs/app.log"
           else
             echo "⚠️ Health check returned HTTP $HEALTH_STATUS"
             ssh -i ~/.ssh/deploy_key \
               ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} \
-              "sudo journalctl -u $APP_NAME -n 50 --no-pager"
+              "tail -100 $APP_HOME/logs/app.log"
             exit 1
           fi
 
@@ -138,32 +159,51 @@ jobs:
         if: failure()
         run: |
           ssh -i ~/.ssh/deploy_key \
-            ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} << 'EOF'
+            ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} << EOF
           set -e
           
           echo "⚠️ Deployment failed! Starting rollback..."
           
+          # Stop current app
+          if [ -f "$APP_HOME/app.pid" ]; then
+            PID=\$(cat $APP_HOME/app.pid)
+            if ps -p \$PID > /dev/null 2>&1; then
+              kill \$PID || kill -9 \$PID
+              echo "Stopped failed deployment process \$PID"
+            fi
+          fi
+          
           if [ -f "$APP_HOME/.backups/previous_version" ]; then
-            PREVIOUS=$(cat $APP_HOME/.backups/previous_version)
-            if [ -d "$APP_HOME/versions/$PREVIOUS" ]; then
-              # Stop current app
-              sudo systemctl stop $APP_NAME || true
-              sleep 2
-              
+            PREVIOUS=\$(cat $APP_HOME/.backups/previous_version)
+            if [ -d "$APP_HOME/versions/\$PREVIOUS" ]; then
               # Revert to previous version
               rm -f $APP_HOME/current
-              ln -s $APP_HOME/versions/$PREVIOUS $APP_HOME/current
-              echo "$PREVIOUS" > $APP_HOME/.backups/current_version
+              ln -s $APP_HOME/versions/\$PREVIOUS $APP_HOME/current
+              echo "\$PREVIOUS" > $APP_HOME/.backups/current_version
               
               # Restart with previous version
-              sudo systemctl start $APP_NAME
+              cd $APP_HOME/current
+              nohup java -jar app.jar \
+                --spring.application.name=$APP_NAME \
+                --spring.profiles.active=$PROFILE \
+                --server.port=$APP_PORT \
+                > $APP_HOME/logs/app.log 2>&1 &
+              
+              NEW_PID=\$!
+              echo \$NEW_PID > $APP_HOME/app.pid
               sleep 3
               
-              echo "🔄 Rolled back to: $PREVIOUS"
-              echo "Application status:"
-              sudo systemctl status $APP_NAME
+              echo "🔄 Rolled back to: \$PREVIOUS"
+              echo "Application PID: \$NEW_PID"
+              
+              if ps -p \$NEW_PID > /dev/null 2>&1; then
+                echo "✅ Rollback successful"
+              else
+                echo "❌ Rollback failed"
+                tail -50 $APP_HOME/logs/app.log
+              fi
             else
-              echo "❌ Previous version directory not found: $PREVIOUS"
+              echo "❌ Previous version directory not found: \$PREVIOUS"
               exit 1
             fi
           else
