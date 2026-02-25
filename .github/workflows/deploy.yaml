@@ -41,7 +41,7 @@ jobs:
       - name: 📁 Create remote directories
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
-            ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} << 'EOF'
+            ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} << EOF
           mkdir -p $APP_HOME/versions
           mkdir -p $APP_HOME/.backups
           mkdir -p $APP_HOME/logs
@@ -50,11 +50,11 @@ jobs:
       - name: 💾 Save current version as previous
         run: |
           ssh -i ~/.ssh/deploy_key \
-            ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} << 'EOF'
+            ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} << EOF
           if [ -L "$APP_HOME/latest" ]; then
-            CURRENT=$(basename $(readlink $APP_HOME/latest))
-            echo "$CURRENT" > $APP_HOME/.backups/previous_version
-            echo "Previous version saved: $CURRENT"
+            CURRENT=\$(basename \$(readlink $APP_HOME/latest))
+            echo "\$CURRENT" > $APP_HOME/.backups/previous_version
+            echo "Previous version saved: \$CURRENT"
           fi
           EOF
 
@@ -79,11 +79,10 @@ jobs:
           
           # Update latest symlink and save version info
           ssh -i ~/.ssh/deploy_key \
-            ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} << EOF
-          ln -sfn \$APP_HOME/versions/\$DEPLOY_VERSION \$APP_HOME/latest
-          echo "\$DEPLOY_VERSION" > \$APP_HOME/.backups/current_version
-          echo "Deployed version: \$DEPLOY_VERSION"
-          EOF
+            ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_IP }} \
+            "ln -sfn $APP_HOME/versions/$DEPLOY_VERSION $APP_HOME/latest && \
+             echo $DEPLOY_VERSION > $APP_HOME/.backups/current_version && \
+             echo 'Deployed version: $DEPLOY_VERSION'"
 
       - name: 🔄 Restart application
         run: |
